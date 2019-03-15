@@ -30,7 +30,7 @@ fontsize = 7  # 11
 
 def plot_map(map_con, path=None, nodes=None, counts=None, ax=None, use_osm=False, z=None, bb=None,
              show_labels=False, matcher=None, show_graph=False, zoom_path=False, show_lattice=False,
-             show_matching=False, filename=None, linewidth=2, coord_trans=None):
+             show_matching=False, filename=None, linewidth=2, coord_trans=None, dpi=200):
     """Plot the db/graph and optionally include the observed path and inferred nodes.
 
     :param map_con: Map
@@ -42,6 +42,7 @@ def plot_map(map_con, path=None, nodes=None, counts=None, ax=None, use_osm=False
     :param matcher: Matcher object (overrules given path, nodes and counts)
     :param filename: File to write image to
     :param show_graph: Plot the vertices and edges in the graph
+    :param dpi: Int, dpi of output image
     :return: None
     """
     if matcher is not None:
@@ -299,7 +300,7 @@ def plot_map(map_con, path=None, nodes=None, counts=None, ax=None, use_osm=False
     ax.axis('equal')
     ax.set_aspect('equal')
     if filename is not None:
-        plt.savefig(filename)
+        plt.savefig(filename, dpi=dpi)
         if fig is not None:
             plt.close(fig)
             fig = None
