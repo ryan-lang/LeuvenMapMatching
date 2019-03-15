@@ -25,7 +25,7 @@ match_ne_color = mcolors.CSS4_COLORS['olive']
 lattice_color = mcolors.CSS4_COLORS['magenta']
 nodes_color = mcolors.CSS4_COLORS['cyan']
 path_color = mcolors.CSS4_COLORS['blue']
-fontsize = 8
+fontsize = 7  # 11
 
 
 def plot_map(map_con, path=None, nodes=None, counts=None, ax=None, use_osm=False, z=None, bb=None,
@@ -149,6 +149,7 @@ def plot_map(map_con, path=None, nodes=None, counts=None, ax=None, use_osm=False
                 xytext = ax.transLimits.transform(coord)
                 xytext = (xytext[0]+0.001, xytext[1]+0.0)
                 xytext = ax.transLimits.inverted().transform(xytext)
+                # key = str(key)[-3:]
                 ann = ax.annotate(key, xy=coord, xytext=xytext,
                             # textcoords=('axes fraction', 'axes fraction'),
                             # arrowprops=dict(arrowstyle='->'),
@@ -159,7 +160,9 @@ def plot_map(map_con, path=None, nodes=None, counts=None, ax=None, use_osm=False
 
         logger.debug('Plot lines ...')
         cnt = 0
-        for _, loc_a, _, loc_b in map_con.all_edges(bb=bb_o):
+        for row in map_con.all_edges(bb=bb_o):
+            loc_a = row[1]
+            loc_b = row[3]
             if coord_trans:
                 loc_a = coord_trans(*loc_a)
                 loc_b = coord_trans(*loc_b)
@@ -203,9 +206,14 @@ def plot_map(map_con, path=None, nodes=None, counts=None, ax=None, use_osm=False
                 lat, lon = map_con.node_coordinates(node)
                 node_locs.append((lat, lon, node))
         else:
+            prev_m = None
             for m in matcher.lattice_best:
+                if prev_m is not None and prev_m.edge_m.l2 == m.edge_m.l1:
+                    lat, lon = m.edge_m.p1
+                    node_locs.append((lat, lon, m.edge_m.l1))
                 lat, lon = m.edge_m.pi
                 node_locs.append((lat, lon, m.edge_m.label))
+                prev_m = m
         for lat, lon, label in node_locs:
             if coord_trans:
                 lat, lon = coord_trans(lat, lon)
@@ -244,12 +252,16 @@ def plot_map(map_con, path=None, nodes=None, counts=None, ax=None, use_osm=False
             x, y = to_pixels(lat, lon)
             x2, y2 = to_pixels(lat2, lon2)
             if m.edge_o.is_point():
+                plt.plot(x, y, marker='x', markersize=2 * linewidth, color=match_color, alpha=0.75)
+                plt.plot(x2, y2, marker='+', markersize=2 * linewidth, color=match_color, alpha=0.75)
                 ax.plot((x, x2), (y, y2), '-', color=match_color, linewidth=linewidth, alpha=0.75)
             else:
+                plt.plot(x, y, marker='x', markersize=2 * linewidth, color=match_ne_color, alpha=0.75)
+                plt.plot(x2, y2, marker='+', markersize=2 * linewidth, color=match_ne_color, alpha=0.75)
                 ax.plot((x, x2), (y, y2), '-', color=match_ne_color, linewidth=linewidth, alpha=0.75)
             # ax.plot((x, x2), (y, y2), '-', color=match_color, linewidth=10, alpha=0.1)
             # if show_labels:
-            #     ax.annotate(str(m.obs), xy=(x, y))
+            #     ax.annotate(f"{m.obs}.{m.obs_ne}", xy=(x, y))
     elif path and nodes and len(path) == len(nodes) and show_matching:
         logger.debug('Plot matching path-nodes (using sequence of nodes) ...')
         for idx, (loc, node) in enumerate(zip(path, nodes)):
@@ -321,16 +333,18 @@ def plot_lattice(ax, to_pixels, matcher):
                     ax.plot((x1, x2), (y1, y2), '.-', color=lattice_color, linewidth=linewidth, alpha=alpha)
 
 
-def plot_obs_noise_dist(matcher):
+def plot_obs_noise_dist(obs_fn, obs_noise, min_dist=0, max_dist=10):
     """Plot the expected noise of an observation distribution.
 
     :param matcher: Matcher
     :return:
     """
-    x = np.linspace(matcher.obs_noise_dist.ppf(0.01), matcher.obs_noise_dist.ppf(0.999), 100)
-    y = matcher.obs_noise_dist.pdf(x) * math.exp(matcher.obs_noise_logint)
+    x = np.linspace(min_dist, max_dist, 100)
+    y = [obs_fn(xi) for xi in x]
     plt.plot(x, y)
     plt.xlabel("Distance")
     plt.ylabel("Probability")
-    plt.axvline(x=matcher.obs_noise, color='red', alpha=0.7)
-    plt.annotate("Observation noise stddev", xy=(matcher.obs_noise, 0))
+    plt.xlim((min_dist, max_dist))
+    plt.ylim((0, 1))
+    plt.axvline(x=obs_noise, color='red', alpha=0.7)
+    plt.annotate("Observation noise stddev", xy=(obs_noise, 0))

@@ -6,12 +6,18 @@ The matching is based on a Hidden Markov Model (HMM) with non-emitting
 states. The model can deal with missing data and you can plug in custom
 transition and emission probability distributions.
 
-![example](http://people.cs.kuleuven.be/wannes.meert/leuvenmapmatching/example1.png?v=1)
+![example](http://people.cs.kuleuven.be/wannes.meert/leuvenmapmatching/example1.png?v=2)
 
-Reference:
+Main reference:
 
 > Meert Wannes, Mathias Verbeke, "HMM with Non-Emitting States for Map Matching",
 > European Conference on Data Analysis (ECDA), Paderborn, Germany, 2018.
+
+Other references:
+
+> Devos Laurens, Vandebril Raf (supervisor), Meert Wannes (supervisor),
+> "Trafﬁc patterns revealed through matrix functions and map matching",
+> Master thesis, Faculty of Engineering Science, KU Leuven, 2018
 
 ## Installation and usage
 
@@ -62,5 +68,5 @@ Developed with the support of [Elucidata.be](http://www.elucidata.be).
 
 ## License
 
-Copyright 2015-2018, KU Leuven - DTAI Research Group, Sirris  
+Copyright 2015-2018, KU Leuven - DTAI Research Group, Sirris - Elucidata Group  
 Apache License, Version 2.0.

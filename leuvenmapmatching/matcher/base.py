@@ -16,10 +16,7 @@ import sys
 import logging
 import time
 from collections import OrderedDict, defaultdict, namedtuple
-MYPY = False
-if MYPY:
-    from typing import List, Tuple, Dict, Any
-from typing import Optional, Set
+from typing import List, Tuple, Dict, Any, Optional, Set
 
 import numpy as np
 
@@ -66,12 +63,12 @@ class BaseMatching(object):
         if edge_m.is_point() and edge_o.is_point():
             # node to node
             dist = self.matcher.map.distance(edge_m.p1, edge_o.p1)
-            proj_m = edge_m.p1
-            proj_o = edge_o.pi
+            # proj_m = edge_m.p1
+            # proj_o = edge_o.pi
         elif edge_m.is_point() and not edge_o.is_point():
             # node to edge
             dist, proj_o, t_o = self.matcher.map.distance_point_to_segment(edge_m.p1, edge_o.p1, edge_o.p2)
-            proj_m = edge_m.p1
+            # proj_m = edge_m.p1
             edge_o.pi = proj_o
             edge_o.ti = t_o
         elif not edge_m.is_point() and edge_o.is_point():
@@ -85,7 +82,7 @@ class BaseMatching(object):
                     return None
             edge_m.pi = proj_m
             edge_m.ti = t_m
-            proj_o = edge_o.pi
+            # proj_o = edge_o.pi
         elif not edge_m.is_point() and not edge_o.is_point():
             # edge to edge
             dist, proj_m, proj_o, t_m, t_o = self.matcher.map.distance_segment_to_segment(edge_m.p1, edge_m.p2,
@@ -102,6 +99,10 @@ class BaseMatching(object):
                                                                 is_next_ne=(obs_ne != 0))
         logprob_obs, props_obs = self.matcher.logprob_obs(dist, self, edge_m, edge_o,
                                                           is_ne=(obs_ne != 0))
+        if __debug__ and logprob_trans > 0:
+            raise Exception(f"logprob_trans = {logprob_trans} > 0")
+        if __debug__ and logprob_obs > 0:
+            raise Exception(f"logprob_obs = {logprob_obs} > 0")
         new_logprob_delta = logprob_trans + logprob_obs
         if obs_ne == 0:
             new_logprobe = self.logprob + new_logprob_delta
@@ -112,13 +113,20 @@ class BaseMatching(object):
             # "* e^(ne_length_factor_log)" or "- ne_length_factor_log" for every step to a non-emitting
             # state to prefer shorter paths
             new_logprobe = self.logprobe + self.matcher.ne_length_factor_log
-            new_logprobne = self.logprobne + new_logprob_delta
+            # We use min() as it is a monotonic function, in contrast with an average
+            new_logprobne = min(self.logprobne, new_logprob_delta)
+            new_logprob = new_logprobe + new_logprobne
+            # Alternative approach with an average
+            # new_logprobne = self.logprobne + new_logprob_delta
             # "+ 1" to punish non-emitting states a bit less. Otherwise it would be
             # similar to (Pr_tr*Pr_obs)**2, which punishes just one non-emitting state too much.
-            new_logprob = new_logprobe + new_logprobne / (obs_ne + 1)
+            # new_logprob = new_logprobe + new_logprobne / (obs_ne + 1)
             new_length = self.length
         new_logprobema = ema_const.cur * new_logprob_delta + ema_const.prev * self.logprobema
         new_stop |= self.matcher.do_stop(new_logprob / new_length, dist, logprob_trans, logprob_obs)
+        if __debug__ and new_logprob > self.logprob:
+            raise Exception(f"Expecting a monotonic probability, "
+                            f"new_logprob = {new_logprob} > logprob = {self.logprob}")
         if not new_stop or (__debug__ and logger.isEnabledFor(logging.DEBUG)):
             m_next = self.__class__(self.matcher, edge_m, edge_o,
                                     logprob=new_logprob, logprobne=new_logprobne,
@@ -291,7 +299,8 @@ class BaseMatcher:
             not associated with an observation. Here we assume it can be associated with a location in between
             two observations to allow for pruning. It is advised to set min_prob_norm and/or max_dist to avoid
             visiting all possible nodes in the graph.
-        :param max_lattice_width: Restrict the lattice (or possible candidate states per observation) to this value.
+        :param max_lattice_width: Only keep track of this number of states (thus locations) for a given observation.
+            Restrict the lattice (or possible candidate states per observation) to this value.
             If there are more possible next states, the states with the best likelihood so far are selected.
         :param only_edges: Do not include nodes as states, only edges. This is the typical setting for HMM methods.
         :param matching: Matching type
@@ -422,7 +431,7 @@ class BaseMatcher:
             if not cnt_lat_size_not_zero:
                 if __debug__:
                     logger.debug("No solutions found anymore")
-                early_stop_idx = obs_idx
+                early_stop_idx = obs_idx - 1
                 logger.info(f'Stopped early at observation {early_stop_idx}')
                 break
             self._match_states(obs_idx)
@@ -438,11 +447,19 @@ class BaseMatcher:
         logger.info("Build lattice in {} seconds".format(t_delta))
 
         # Backtrack to find best path
-        if early_stop_idx:
-            if early_stop_idx <= 1:
+        if not early_stop_idx:
+            one_no_stop = False
+            for m in self.lattice[len(path) - 1].values():
+                if not m.stop:
+                    one_no_stop = True
+                    break
+            if not one_no_stop:
+                early_stop_idx = len(path) - 1
+        if early_stop_idx is not None:
+            if early_stop_idx == 0:
                 self.lattice_best = []
                 return [], 0
-            start_idx = early_stop_idx - 2
+            start_idx = early_stop_idx - 1
         else:
             start_idx = len(self.path) - 1
         node_path = self._build_node_path(start_idx, unique)
@@ -548,7 +565,7 @@ class BaseMatcher:
         if __debug__:
             logger.debug("--- obs {} --- {} ---".format(0, self.path[0]))
         t_delta = time.time() - t_start
-        logger.info("Initialized map with {} starting points in {} seconds".format(len(nodes), t_delta))
+        logger.info("Initialized lattice with {} starting points in {} seconds".format(len(nodes), t_delta))
         if len(nodes) == 0:
             logger.info(f'Stopped early at observation 0'
                         f', no starting points/edges x found for which '
@@ -589,7 +606,7 @@ class BaseMatcher:
         return len(self.lattice[0])
 
     def _match_states(self, obs_idx):
-        """
+        """Match states
 
         :param obs_idx:
         :return: True is new states have been found, False otherwise.
@@ -633,7 +650,7 @@ class BaseMatcher:
                                 logger.debug(str(m_next))
                     else:
                         if __debug__:
-                            logger.debug(self.matching.repr_static(('x', f'{nbr_label}-{nbr_label} <')))
+                            logger.debug(self.matching.repr_static(('x', f'{nbr_label}-{nbr_label} < self-loop')))
 
             else:
                 # == Move to neighbour from edge ==
@@ -668,7 +685,8 @@ class BaseMatcher:
                             logger.debug(f"No neighbours found for edge {m.edge_m.label}")
                         continue
                     for nbr_label1, nbr_loc1, nbr_label2, nbr_loc2 in nbrs:
-                        if m.edge_m.l2 != nbr_label2 and m.edge_m.l1 != nbr_label2:  # same edge is different action
+                        # same edge is different action, opposite edge should be allowed to return in a one-way street
+                        if m.edge_m.l2 != nbr_label2 and m.edge_m.l1 != nbr_label1:
                             edge_m = Segment(nbr_label1, nbr_loc1, nbr_label2, nbr_loc2)
                             edge_o = Segment(f"O{obs_idx}", self.path[obs_idx])
                             m_next = m.next(edge_m, edge_o, obs=obs_idx)
@@ -780,7 +798,7 @@ class BaseMatcher:
                 for nbr_label1, nbr_loc1, nbr_label2, nbr_loc2 in nbrs:
                     if self._node_in_prev_ne(m, nbr_label2):
                         if __debug__:
-                            logger.debug(self.matching.repr_static(('x', '{} <'.format(nbr_label2))))
+                            logger.debug(self.matching.repr_static(('x', '{} < node in prev ne'.format(nbr_label2))))
                         continue
                     # === Move to next edge ===
                     if m.edge_m.l2 != nbr_label2 and m.edge_m.l1 != nbr_label2:
@@ -819,7 +837,7 @@ class BaseMatcher:
                                 logger.debug(str(m_next))
                     else:
                         if __debug__:
-                            logger.debug(self.matching.repr_static(('x', f'{nbr_label1}-{nbr_label2} <')))
+                            logger.debug(self.matching.repr_static(('x', f'{nbr_label1}-{nbr_label2} < goes back (ne)')))
             # == Move to neighbour node from node==
             if m.edge_m.l2 is None and not self.only_edges:
                 cur_node = m.edge_m.l1
@@ -837,7 +855,7 @@ class BaseMatcher:
                     # print(f"self._node_in_prev_ne({m.label}, {nbr_label}) = {self._node_in_prev_ne(m, nbr_label)}")
                     if self._node_in_prev_ne(m, nbr_label):
                         if __debug__:
-                            logger.debug(self.matching.repr_static(('x', '{} <'.format(nbr_label))))
+                            logger.debug(self.matching.repr_static(('x', '{} < node in prev ne'.format(nbr_label))))
                         continue
                     # === Move to next node ===
                     if m.edge_m.l1 != nbr_label:
@@ -890,7 +908,7 @@ class BaseMatcher:
                 for nbr_label1, nbr_loc1, nbr_label2, nbr_loc2 in nbrs:
                     if self._node_in_prev_ne(m, nbr_label2):
                         if __debug__:
-                            logger.debug(self.matching.repr_static(('x', '{} <'.format(nbr_label2))))
+                            logger.debug(self.matching.repr_static(('x', '{} < node in prev ne'.format(nbr_label2))))
                         continue
                     # Move to next edge
                     if m.edge_m.l1 != nbr_label2 and m.edge_m.l2 != nbr_label2:
@@ -913,7 +931,7 @@ class BaseMatcher:
                                 logger.debug(str(m_next))
                     else:
                         if __debug__:
-                            logger.debug(self.matching.repr_static(('x', '{} <'.format(nbr_label2))))
+                            logger.debug(self.matching.repr_static(('x', '{} < going back'.format(nbr_label2))))
             else:  # m.edge_m.l2 is None:
                 # Move to neighbour node from node
                 cur_node = m.edge_m.l1
@@ -930,7 +948,7 @@ class BaseMatcher:
                 for nbr_label, nbr_loc in nbrs:
                     if self._node_in_prev_ne(m, nbr_label):
                         if __debug__:
-                            logger.debug(self.matching.repr_static(('x', '{} <'.format(nbr_label))))
+                            logger.debug(self.matching.repr_static(('x', '{} < node in prev ne'.format(nbr_label))))
                         continue
                     # Move to next node
                     if m.edge_m.l1 != nbr_label:
@@ -954,7 +972,7 @@ class BaseMatcher:
                                 logger.debug(str(m_next))
                     else:
                         if __debug__:
-                            logger.debug(self.matching.repr_static(('x', '{} <'.format(nbr_label))))
+                            logger.debug(self.matching.repr_static(('x', '{} < self-loop'.format(nbr_label))))
 
     def _prune_lattice(self, obs_idx):
         logger.debug('Prune lattice[{}] from {} to {}'
@@ -986,13 +1004,31 @@ class BaseMatcher:
         # for label in to_del:
         #     del lattice_col[label]
 
-    def _build_node_path(self, start_idx, unique=True, max_depth=None):
+    def _build_node_path(self, start_idx, unique=True, max_depth=None, last_is_e=False):
+        """Build the path from the lattice.
+
+        :param start_idx:
+        :param unique:
+        :param max_depth:
+        :param last_is_e: Last matched lattice node should be an emitting state.
+            In case the matching stops early, the longest path can be in between two observations
+            and thus be a nonemitting state (which by definition has a lower probability than the
+            last emitting state). If this argument is set to true, the longer match is preferred.
+        :return:
+        """
         self.lattice_best = []
         node_max = None
+        node_max_ne = 0
         cur_depth = 0
-        for m in self.lattice[start_idx].values():
-            if node_max is None or m.logprob > node_max.logprob:
-                node_max = m
+        if last_is_e:
+            for m in self.lattice[start_idx].values():  # type:BaseMatching
+                if not m.stop and (node_max is None or m.logprob > node_max.logprob):
+                    node_max = m
+        else:
+            for m in self.lattice[start_idx].values():  # type:BaseMatching
+                if not m.stop and (node_max is None or m.obs_ne > node_max_ne or m.logprob > node_max.logprob):
+                    node_max_ne = m.obs_ne
+                    node_max = m
         if node_max is None:
             raise Exception("Did not find a matching node for path point at index {}".format(start_idx))
         if __debug__ and logger.isEnabledFor(logging.DEBUG):
@@ -1097,27 +1133,28 @@ class BaseMatcher:
         print("Stats lattice", file=file)
         print("-------------", file=file)
         stats = OrderedDict()
-        stats["nbr levels"] = len(self.lattice)
+        stats["nbr levels"] = len(self.lattice) if self.lattice else "?"
         total_nodes = 0
         max_nodes = 0
         min_nodes = 9999999
-        sizes = []
-        for idx in range(len(self.lattice)):
-            level = self.lattice[idx]
-            # stats["#nodes[{}]".format(idx)] = len(level)
-            sizes.append(len(level))
-            total_nodes += len(level)
-            if len(level) < min_nodes:
-                min_nodes = len(level)
-            if len(level) > max_nodes:
-                max_nodes = len(level)
-        stats["nbr lattice"] = total_nodes
-        if verbose:
-            stats["nbr lattice[level]"] = ", ".join([str(s) for s in sizes])
-        stats["avg lattice[level]"] = total_nodes/len(self.lattice)
-        stats["min lattice[level]"] = min_nodes
-        stats["max lattice[level]"] = max_nodes
-        if len(self.lattice_best) > 0:
+        if self.lattice:
+            sizes = []
+            for idx in range(len(self.lattice)):
+                level = self.lattice[idx]
+                # stats["#nodes[{}]".format(idx)] = len(level)
+                sizes.append(len(level))
+                total_nodes += len(level)
+                if len(level) < min_nodes:
+                    min_nodes = len(level)
+                if len(level) > max_nodes:
+                    max_nodes = len(level)
+            stats["nbr lattice"] = total_nodes
+            if verbose:
+                stats["nbr lattice[level]"] = ", ".join([str(s) for s in sizes])
+            stats["avg lattice[level]"] = total_nodes/len(self.lattice)
+            stats["min lattice[level]"] = min_nodes
+            stats["max lattice[level]"] = max_nodes
+        if self.lattice_best and len(self.lattice_best) > 0:
             stats["avg obs distance"] = np.mean([m.dist_obs for m in self.lattice_best])
             stats["last logprob"] = self.lattice_best[-1].logprob
             stats["last length"] = self.lattice_best[-1].length
@@ -1132,6 +1169,8 @@ class BaseMatcher:
             print("{:<24} : {}".format(key, val), file=file)
 
     def node_counts(self):
+        if self.lattice is None:
+            return None
         counts = defaultdict(lambda: 0)
         for level in self.lattice.values():
             for m in level.values():
@@ -1146,6 +1185,10 @@ class BaseMatcher:
 
         You need to run :meth:`match_incremental` on this object to continue from the existing
         (partial) lattice. Otherwise, if you use :meth:`match`, it will be overwritten.
+
+        Open question, if there is no need to keep track of older lattices, it will probably
+        be more efficient to clear the older parts of the interface instead of copying the newer
+        parts.
 
         :param nb_interfaces: Nb of interfaces (columns in lattice) to keep. Default is 1, the last one.
         :return: new Matcher object
